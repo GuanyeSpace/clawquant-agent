@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -17,6 +18,10 @@ const (
 )
 
 func Decrypt(ciphertext string, password string) (string, error) {
+	if strings.TrimSpace(password) == "" {
+		return "", fmt.Errorf("password is required")
+	}
+
 	blob, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("decode ciphertext: %w", err)

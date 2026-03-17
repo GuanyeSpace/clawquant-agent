@@ -3,10 +3,12 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -15,6 +17,7 @@ import (
 
 type Store struct {
 	db *sql.DB
+	mu sync.RWMutex
 }
 
 type LogEntry struct {
@@ -42,6 +45,8 @@ func OpenSQLite(ctx context.Context, dataDir string) (*Store, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode = WAL;`); err != nil {
 		db.Close()
@@ -49,6 +54,11 @@ func OpenSQLite(ctx context.Context, dataDir string) (*Store, string, error) {
 	}
 
 	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON;`); err != nil {
+		db.Close()
+		return nil, "", err
+	}
+
+	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout = 5000;`); err != nil {
 		db.Close()
 		return nil, "", err
 	}
@@ -98,6 +108,9 @@ func (s *Store) Close() error {
 		return nil
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	return s.db.Close()
 }
 
@@ -110,6 +123,9 @@ func (s *Store) SaveLog(botID, level, message, data string) error {
 		data = "{}"
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, err := s.db.Exec(`
 		INSERT INTO logs (bot_id, level, message, data, created_at, synced)
 		VALUES (?, ?, ?, ?, ?, 0)
@@ -117,7 +133,7 @@ func (s *Store) SaveLog(botID, level, message, data string) error {
 	return err
 }
 
-func (s *Store) GetUnsynced(limit int) ([]LogEntry, error) {
+func (s *Store) GetUnsyncedLogs(limit int) ([]LogEntry, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("store is not initialized")
 	}
@@ -125,6 +141,9 @@ func (s *Store) GetUnsynced(limit int) ([]LogEntry, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
 		SELECT id, bot_id, level, message, data, created_at, synced
@@ -160,7 +179,11 @@ func (s *Store) GetUnsynced(limit int) ([]LogEntry, error) {
 	return entries, nil
 }
 
-func (s *Store) MarkSynced(ids []int64) error {
+func (s *Store) GetUnsynced(limit int) ([]LogEntry, error) {
+	return s.GetUnsyncedLogs(limit)
+}
+
+func (s *Store) MarkLogsSynced(ids []int64) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("store is not initialized")
 	}
@@ -176,11 +199,82 @@ func (s *Store) MarkSynced(ids []int64) error {
 		args = append(args, id)
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, err := s.db.Exec(fmt.Sprintf(`
 		UPDATE logs
 		SET synced = 1
 		WHERE id IN (%s)
 	`, strings.Join(placeholders, ",")), args...)
+	return err
+}
+
+func (s *Store) MarkSynced(ids []int64) error {
+	return s.MarkLogsSynced(ids)
+}
+
+func (s *Store) GetStorage(botID, key string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("store is not initialized")
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var value sql.NullString
+	err := s.db.QueryRow(`
+		SELECT value
+		FROM storage
+		WHERE bot_id = ? AND key = ?
+	`, botID, key).Scan(&value)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", sql.ErrNoRows
+		}
+		return "", err
+	}
+
+	return value.String, nil
+}
+
+func (s *Store) SetStorage(botID, key, value string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		INSERT INTO storage (bot_id, key, value)
+		VALUES (?, ?, ?)
+		ON CONFLICT(bot_id, key) DO UPDATE SET value = excluded.value
+	`, botID, key, value)
+	return err
+}
+
+func (s *Store) DeleteBotStorage(botID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM storage WHERE bot_id = ?`, botID)
+	return err
+}
+
+func (s *Store) DeleteBotLogs(botID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM logs WHERE bot_id = ?`, botID)
 	return err
 }
 

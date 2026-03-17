@@ -5,9 +5,9 @@ import (
 )
 
 func TestDecryptKnownVector(t *testing.T) {
-	const password = "correct horse battery staple"
-	const encrypted = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaG1XanZcH2nPZ9pomUlYGII28/Tn6vDzhU+kPAqx0MyU="
-	const expected = "binance-api-key"
+	const password = "mypassword"
+	const encrypted = "ctTrtaWwLBT5oRfZl3ulRDH9ODeCByeLCEfk7fi/GtXb4GSdcHmTUPe7XcmbRCHkur3U6airqhE="
+	const expected = "test-api-key"
 
 	got, err := Decrypt(encrypted, password)
 	if err != nil {
@@ -19,8 +19,24 @@ func TestDecryptKnownVector(t *testing.T) {
 	}
 }
 
+func TestDecryptRejectsWrongPassword(t *testing.T) {
+	const encrypted = "ctTrtaWwLBT5oRfZl3ulRDH9ODeCByeLCEfk7fi/GtXb4GSdcHmTUPe7XcmbRCHkur3U6airqhE="
+
+	if _, err := Decrypt(encrypted, "wrong-password"); err == nil {
+		t.Fatal("expected wrong password to fail")
+	}
+}
+
 func TestDecryptRejectsBadCiphertext(t *testing.T) {
 	if _, err := Decrypt("bad-data", "secret"); err == nil {
 		t.Fatal("expected invalid ciphertext to fail")
+	}
+}
+
+func TestDecryptRejectsCorruptedCiphertext(t *testing.T) {
+	const encrypted = "ctTrtaWwLBT5oRfZl3ulRDH9ODeCByeLCEfk7fi/GtXb4GSdcHmTUPe7XcmbRCHkur3U6airqhE="
+
+	if _, err := Decrypt(encrypted[:len(encrypted)-4]+"AAAA", "mypassword"); err == nil {
+		t.Fatal("expected corrupted ciphertext to fail")
 	}
 }

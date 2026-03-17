@@ -589,7 +589,7 @@ func (m *Manager) syncUnsyncedLogs() error {
 			return ErrNotConnected
 		}
 
-		entries, err := m.store.GetUnsynced(logSyncBatchSize)
+		entries, err := m.store.GetUnsyncedLogs(logSyncBatchSize)
 		if err != nil {
 			return err
 		}
@@ -608,7 +608,7 @@ func (m *Manager) syncUnsyncedLogs() error {
 			}
 
 			if err := m.writeDirect(payload); err != nil {
-				if err := m.store.MarkSynced(syncedIDs); err != nil {
+				if err := m.store.MarkLogsSynced(syncedIDs); err != nil {
 					m.logf("Mark synced partial batch failed: %v", err)
 				}
 				return err
@@ -617,7 +617,7 @@ func (m *Manager) syncUnsyncedLogs() error {
 			syncedIDs = append(syncedIDs, entry.ID)
 		}
 
-		if err := m.store.MarkSynced(syncedIDs); err != nil {
+		if err := m.store.MarkLogsSynced(syncedIDs); err != nil {
 			return err
 		}
 
