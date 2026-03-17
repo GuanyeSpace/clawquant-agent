@@ -1,9 +1,13 @@
 # clawquant-agent
 
-`clawquant-agent` 的 Go 项目初始化骨架，包含：
+`clawquant-agent` 是一个通过 WebSocket 连接 ClawQuant 平台的独立 Agent 二进制。
+
+当前骨架包含：
 
 - 标准 `cmd/ + internal/ + scripts/` 目录布局
-- 可注入版本信息的 CLI 入口
+- WebSocket 连接管理器和指令分发器
+- 本地 SQLite 初始化
+- HMAC 签名与 AES-GCM 解密模块
 - `Makefile`
 - PowerShell 交叉编译脚本
 
@@ -12,14 +16,20 @@
 ```text
 .
 |-- cmd/
-|   `-- clawquant-agent/
+|   `-- agent/
 |       `-- main.go
 |-- internal/
 |   |-- app/
-|   |   |-- runner.go
-|   |   `-- runner_test.go
+|   |   |-- app.go
+|   |   `-- config.go
 |   `-- buildinfo/
 |       `-- buildinfo.go
+|   |-- command/
+|   |-- connection/
+|   |-- crypto/
+|   |-- process/
+|   `-- storage/
+|-- bin/
 |-- scripts/
 |   `-- build-cross.ps1
 |-- dist/
@@ -31,7 +41,7 @@
 
 ```powershell
 go test ./...
-go run ./cmd/clawquant-agent -version
+go run ./cmd/agent --help
 powershell -ExecutionPolicy Bypass -File .\scripts\build-cross.ps1
 ```
 
@@ -41,7 +51,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-cross.ps1
 make fmt
 make test
 make build
+make build-linux
+make run
 make cross-build
+```
+
+## 启动
+
+```powershell
+.\bin\clawquant-agent.exe --token xxx --secret xxx --server ws://localhost:8080
 ```
 
 ## 版本注入

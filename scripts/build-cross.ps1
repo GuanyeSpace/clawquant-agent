@@ -2,6 +2,7 @@
 param(
     [string]$ProjectName = "clawquant-agent",
     [string]$ModulePath = "github.com/GuanyeSpace/clawquant-agent",
+    [string]$MainPackage = "./cmd/agent",
     [string]$Version,
     [string]$Commit,
     [string]$BuildTime,
@@ -38,7 +39,7 @@ function Resolve-GitValue {
 
 $root = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $root "dist"
-$cmdPath = "./cmd/$ProjectName"
+$cmdPath = $MainPackage
 
 $originalEnv = @{
     CGO_ENABLED = $env:CGO_ENABLED
