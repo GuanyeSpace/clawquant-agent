@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/GuanyeSpace/clawquant-agent/internal/command"
 	clawcrypto "github.com/GuanyeSpace/clawquant-agent/internal/crypto"
+	"github.com/GuanyeSpace/clawquant-agent/internal/storage"
 )
 
 func TestManagerConnectDispatchesCommand(t *testing.T) {
@@ -78,7 +80,7 @@ func TestManagerConnectDispatchesCommand(t *testing.T) {
 
 	logger := log.New(testWriter{t}, "", 0)
 	dispatcher := command.NewDispatcher(logger)
-	manager := NewManager("test-token", "test-secret", wsURL(server.URL), dispatcher, staticCounter(0), logger)
+	manager := NewManager("test-token", "test-secret", wsURL(server.URL), dispatcher, staticCounter(0), nil, logger)
 	dispatcher.SetSender(manager)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -132,7 +134,7 @@ func TestManagerConnectRejectsFailedAuth(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewManager("test-token", "test-secret", wsURL(server.URL), noopHandler{}, staticCounter(0), nil)
+	manager := NewManager("test-token", "test-secret", wsURL(server.URL), noopHandler{}, staticCounter(0), nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -179,7 +181,7 @@ func TestBuildAgentEndpoint(t *testing.T) {
 }
 
 func TestDispatchIgnoresUnknownType(t *testing.T) {
-	manager := NewManager("token", "secret", "ws://localhost:8080", noopHandler{}, staticCounter(0), nil)
+	manager := NewManager("token", "secret", "ws://localhost:8080", noopHandler{}, staticCounter(0), nil, nil)
 	payload, err := json.Marshal(map[string]string{"type": "unknown"})
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
@@ -188,4 +190,163 @@ func TestDispatchIgnoresUnknownType(t *testing.T) {
 	if err := manager.dispatch(payload, "unknown"); err != nil {
 		t.Fatalf("dispatch returned error: %v", err)
 	}
+}
+
+func TestManagerSendLogPersistsAndSyncs(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	logCh := make(chan logMessage, 4)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		var auth authMessage
+		if err := conn.ReadJSON(&auth); err != nil {
+			t.Errorf("read auth failed: %v", err)
+			return
+		}
+
+		if err := conn.WriteJSON(authResult{Type: "auth_result", Success: true, AgentID: "agent-1"}); err != nil {
+			t.Errorf("write auth_result failed: %v", err)
+			return
+		}
+
+		for {
+			var msg map[string]json.RawMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+
+			var msgType string
+			if err := json.Unmarshal(msg["type"], &msgType); err != nil {
+				t.Errorf("unmarshal type failed: %v", err)
+				return
+			}
+
+			if msgType != "log" {
+				continue
+			}
+
+			var entry logMessage
+			if err := json.Unmarshal(mustMarshal(t, msg), &entry); err != nil {
+				t.Errorf("unmarshal log failed: %v", err)
+				return
+			}
+
+			logCh <- entry
+		}
+	}))
+	defer server.Close()
+
+	store, _, err := storage.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("OpenSQLite returned error: %v", err)
+	}
+	defer store.Close()
+
+	manager := NewManager("test-token", "test-secret", wsURL(server.URL), noopHandler{}, staticCounter(0), store, log.New(testWriter{t}, "", 0))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := manager.Connect(ctx); err != nil {
+		t.Fatalf("Connect returned error: %v", err)
+	}
+	defer manager.Close()
+
+	if err := manager.SendLog("bot-1", "info", "hello", map[string]string{"source": "test"}); err != nil {
+		t.Fatalf("SendLog returned error: %v", err)
+	}
+
+	select {
+	case msg := <-logCh:
+		if msg.BotID != "bot-1" || msg.Level != "info" || msg.Message != "hello" {
+			t.Fatalf("unexpected log message: %+v", msg)
+		}
+
+		if string(msg.Data) != `{"source":"test"}` {
+			t.Fatalf("unexpected log data: %s", string(msg.Data))
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for synced log")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := store.GetUnsynced(100)
+		if err != nil {
+			t.Fatalf("GetUnsynced returned error: %v", err)
+		}
+
+		if len(entries) == 0 {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("log entry was not marked synced: %+v", entries)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestManagerSendLogCachesWhenDisconnected(t *testing.T) {
+	store, _, err := storage.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("OpenSQLite returned error: %v", err)
+	}
+	defer store.Close()
+
+	manager := NewManager("token", "secret", "ws://localhost:8080", noopHandler{}, staticCounter(0), store, nil)
+	manager.ctx = context.Background()
+
+	if err := manager.SendLog("bot-2", "warn", "cached", map[string]any{"attempt": 1}); err != nil {
+		t.Fatalf("SendLog returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	manager.cancel = cancel
+	manager.ctx = ctx
+	manager.wg.Add(2)
+	go manager.logPersistLoop()
+	go manager.logSyncLoop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := store.GetUnsynced(100)
+		if err != nil {
+			t.Fatalf("GetUnsynced returned error: %v", err)
+		}
+
+		if len(entries) == 1 {
+			if entries[0].BotID != "bot-2" || entries[0].Synced {
+				t.Fatalf("unexpected cached entry: %+v", entries[0])
+			}
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for cached log, got %d entries", len(entries))
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	manager.wg.Wait()
+}
+
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	return payload
 }

@@ -1,7 +1,6 @@
 package command
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -9,6 +8,7 @@ import (
 
 type Sender interface {
 	Send(msg []byte) error
+	SendBotStatus(botID, status, errMsg string) error
 }
 
 type Dispatcher struct {
@@ -62,14 +62,5 @@ func (d *Dispatcher) sendStatus(botID, status string) error {
 		return fmt.Errorf("status sender not configured")
 	}
 
-	payload, err := json.Marshal(map[string]string{
-		"type":   "bot_status",
-		"bot_id": botID,
-		"status": status,
-	})
-	if err != nil {
-		return err
-	}
-
-	return sender.Send(payload)
+	return sender.SendBotStatus(botID, status, "")
 }

@@ -29,17 +29,17 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 
 	logger := log.New(stderr, "", log.LstdFlags)
 
-	db, dbPath, err := storage.OpenSQLite(ctx, parsed.Config.DataDir)
+	store, dbPath, err := storage.OpenSQLite(ctx, parsed.Config.DataDir)
 	if err != nil {
 		return fmt.Errorf("initialize sqlite: %w", err)
 	}
-	defer db.Close()
+	defer store.Close()
 
 	logger.Printf("SQLite initialized at %s", dbPath)
 
 	processManager := process.NewManager(logger)
 	dispatcher := command.NewDispatcher(logger)
-	manager := connection.NewManager(parsed.Config.Token, parsed.Config.Secret, parsed.Config.Server, dispatcher, processManager, logger)
+	manager := connection.NewManager(parsed.Config.Token, parsed.Config.Secret, parsed.Config.Server, dispatcher, processManager, store, logger)
 	dispatcher.SetSender(manager)
 
 	if err := manager.Connect(ctx); err != nil {
