@@ -14,8 +14,9 @@ type Sender interface {
 type Dispatcher struct {
 	logger *log.Logger
 
-	mu     sync.RWMutex
-	sender Sender
+	mu         sync.RWMutex
+	sender     Sender
+	controller BotController
 }
 
 func NewDispatcher(logger *log.Logger) *Dispatcher {
@@ -29,12 +30,32 @@ func (d *Dispatcher) SetSender(sender Sender) {
 	d.sender = sender
 }
 
+func (d *Dispatcher) SetController(controller BotController) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.controller = controller
+}
+
 func (d *Dispatcher) HandleCreateBot(cmd CreateBotCommand) error {
 	if d.logger != nil {
 		d.logger.Printf("Received create_bot for bot_id=%s", cmd.BotID)
 	}
 
-	return d.sendStatus(cmd.BotID, "running")
+	d.mu.RLock()
+	controller := d.controller
+	d.mu.RUnlock()
+
+	if controller == nil {
+		return d.sendStatus(cmd.BotID, "running", "")
+	}
+
+	if err := controller.StartBot(cmd); err != nil {
+		_ = d.sendStatus(cmd.BotID, "error", err.Error())
+		return err
+	}
+
+	return nil
 }
 
 func (d *Dispatcher) HandleStopBot(cmd StopBotCommand) error {
@@ -42,7 +63,20 @@ func (d *Dispatcher) HandleStopBot(cmd StopBotCommand) error {
 		d.logger.Printf("Received stop_bot for bot_id=%s", cmd.BotID)
 	}
 
-	return d.sendStatus(cmd.BotID, "stopped")
+	d.mu.RLock()
+	controller := d.controller
+	d.mu.RUnlock()
+
+	if controller == nil {
+		return d.sendStatus(cmd.BotID, "stopped", "")
+	}
+
+	if err := controller.StopBot(cmd.BotID); err != nil {
+		_ = d.sendStatus(cmd.BotID, "error", err.Error())
+		return err
+	}
+
+	return nil
 }
 
 func (d *Dispatcher) HandleRestartBot(cmd RestartBotCommand) error {
@@ -50,10 +84,23 @@ func (d *Dispatcher) HandleRestartBot(cmd RestartBotCommand) error {
 		d.logger.Printf("Received restart_bot for bot_id=%s", cmd.BotID)
 	}
 
-	return d.sendStatus(cmd.BotID, "running")
+	d.mu.RLock()
+	controller := d.controller
+	d.mu.RUnlock()
+
+	if controller == nil {
+		return d.sendStatus(cmd.BotID, "running", "")
+	}
+
+	if err := controller.RestartBot(cmd.BotID); err != nil {
+		_ = d.sendStatus(cmd.BotID, "error", err.Error())
+		return err
+	}
+
+	return nil
 }
 
-func (d *Dispatcher) sendStatus(botID, status string) error {
+func (d *Dispatcher) sendStatus(botID, status, errMsg string) error {
 	d.mu.RLock()
 	sender := d.sender
 	d.mu.RUnlock()
@@ -62,5 +109,5 @@ func (d *Dispatcher) sendStatus(botID, status string) error {
 		return fmt.Errorf("status sender not configured")
 	}
 
-	return sender.SendBotStatus(botID, status, "")
+	return sender.SendBotStatus(botID, status, errMsg)
 }

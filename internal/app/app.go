@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/GuanyeSpace/clawquant-agent/internal/buildinfo"
@@ -37,9 +39,20 @@ func Run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer,
 
 	logger.Printf("SQLite initialized at %s", dbPath)
 
-	processManager := process.NewManager(logger)
 	dispatcher := command.NewDispatcher(logger)
+	sdkDir, err := resolveSDKDir()
+	if err != nil {
+		return err
+	}
+
+	processManager, err := process.NewManager(parsed.Config.DataDir, sdkDir, store, logger)
+	if err != nil {
+		return fmt.Errorf("initialize process manager: %w", err)
+	}
+
 	manager := connection.NewManager(parsed.Config.Token, parsed.Config.Secret, parsed.Config.Server, dispatcher, processManager, store, logger)
+	processManager.SetConnectionManager(manager)
+	dispatcher.SetController(processManager)
 	dispatcher.SetSender(manager)
 
 	if err := manager.Connect(ctx); err != nil {
@@ -79,4 +92,38 @@ func handleParseError(err error) error {
 	}
 
 	return err
+}
+
+func resolveSDKDir() (string, error) {
+	var candidates []string
+
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "sdk"))
+	}
+
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "sdk"),
+			filepath.Join(exeDir, "..", "sdk"),
+		)
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		absPath, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[absPath]; ok {
+			continue
+		}
+		seen[absPath] = struct{}{}
+
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			return absPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("sdk directory not found; expected ./sdk near the working directory or executable")
 }

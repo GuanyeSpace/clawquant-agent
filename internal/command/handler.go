@@ -8,6 +8,12 @@ type CommandHandler interface {
 	HandleRestartBot(cmd RestartBotCommand) error
 }
 
+type BotController interface {
+	StartBot(cmd CreateBotCommand) error
+	StopBot(botID string) error
+	RestartBot(botID string) error
+}
+
 type ExchangeConfig struct {
 	Type            string `json:"type"`
 	EncryptedAPIKey string `json:"encrypted_api_key"`
@@ -16,11 +22,12 @@ type ExchangeConfig struct {
 }
 
 type CreateBotCommand struct {
-	Type         string          `json:"type"`
-	BotID        string          `json:"bot_id"`
-	StrategyCode string          `json:"strategy_code"`
-	Params       json.RawMessage `json:"params"`
-	Exchange     ExchangeConfig  `json:"exchange"`
+	Type          string          `json:"type"`
+	BotID         string          `json:"bot_id"`
+	StrategyCode  string          `json:"strategy_code"`
+	Params        json.RawMessage `json:"params"`
+	EncryptionKey string          `json:"encryption_key,omitempty"`
+	Exchange      ExchangeConfig  `json:"exchange"`
 }
 
 type StopBotCommand struct {
