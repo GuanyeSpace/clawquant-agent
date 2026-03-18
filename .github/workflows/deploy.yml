@@ -1,0 +1,34 @@
+name: Deploy Agent
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy to agent server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: $ secrets.DEPLOY_HOST 
+          username: $ secrets.DEPLOY_USER 
+          key: $ secrets.DEPLOY_SSH_KEY 
+          script_stop: true
+          script: |
+            set -e
+            echo "=== Pulling latest code ==="
+            cd ~/clawquant-agent
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== Building agent binary ==="
+            make build
+
+            echo "=== Restarting agent service ==="
+            sudo systemctl restart clawquant-agent
+            sleep 3
+            sudo systemctl status clawquant-agent --no-pager
+
+            echo "=== Deploy complete at $(date) ==="
