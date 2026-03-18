@@ -139,6 +139,63 @@ func TestRestartBotUsesSavedConfiguration(t *testing.T) {
 	}
 }
 
+func TestResolveExchangeCredentialsUsesPlaintextFields(t *testing.T) {
+	apiKey, secret, err := resolveExchangeCredentials(command.ExchangeConfig{
+		APIKey:          "plain-api-key",
+		Secret:          "plain-secret",
+		EncryptedAPIKey: "ignored",
+		EncryptedSecret: "ignored",
+	}, "")
+	if err != nil {
+		t.Fatalf("resolveExchangeCredentials returned error: %v", err)
+	}
+
+	if apiKey != "plain-api-key" || secret != "plain-secret" {
+		t.Fatalf("unexpected plaintext credentials: apiKey=%q secret=%q", apiKey, secret)
+	}
+}
+
+func TestResolveExchangeCredentialsDecryptsEncryptedFields(t *testing.T) {
+	apiKey, secret, err := resolveExchangeCredentials(command.ExchangeConfig{
+		EncryptedAPIKey: encryptForTest(t, "encrypted-api-key", "test-password"),
+		EncryptedSecret: encryptForTest(t, "encrypted-secret", "test-password"),
+	}, "test-password")
+	if err != nil {
+		t.Fatalf("resolveExchangeCredentials returned error: %v", err)
+	}
+
+	if apiKey != "encrypted-api-key" || secret != "encrypted-secret" {
+		t.Fatalf("unexpected decrypted credentials: apiKey=%q secret=%q", apiKey, secret)
+	}
+}
+
+func TestBuildPythonEnvSetsTestnetFlagFromCommand(t *testing.T) {
+	env := envSliceToMap(buildPythonEnv(
+		[]string{"PATH=/usr/bin"},
+		"/tmp/sdk",
+		"/tmp/bot",
+		command.CreateBotCommand{
+			BotID:  "bot-testnet",
+			Params: json.RawMessage(`{"x":1}`),
+			Exchange: command.ExchangeConfig{
+				Type:        "binance",
+				TradingPair: "BTC_USDT",
+				Testnet:     true,
+			},
+		},
+		"plain-api-key",
+		"plain-secret",
+	))
+
+	if env["CLAWQUANT_TESTNET"] != "1" {
+		t.Fatalf("expected CLAWQUANT_TESTNET=1, got %q", env["CLAWQUANT_TESTNET"])
+	}
+
+	if env["CLAWQUANT_API_KEY"] != "plain-api-key" || env["CLAWQUANT_SECRET"] != "plain-secret" {
+		t.Fatalf("unexpected credential env values: %#v", env)
+	}
+}
+
 func newTestManager(t *testing.T) (*Manager, *storage.Store) {
 	t.Helper()
 
@@ -253,6 +310,19 @@ func encryptForTest(t *testing.T, plaintext, password string) string {
 	ciphertext := gcm.Seal(nil, nonce, []byte(plaintext), nil)
 	blob := append(append(append([]byte{}, salt...), nonce...), ciphertext...)
 	return base64.StdEncoding.EncodeToString(blob)
+}
+
+func envSliceToMap(values []string) map[string]string {
+	result := make(map[string]string, len(values))
+	for _, item := range values {
+		parts := strings.SplitN(item, "=", 2)
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+			continue
+		}
+		result[parts[0]] = ""
+	}
+	return result
 }
 
 type testWriter struct {

@@ -166,6 +166,18 @@ func (noopHandler) HandleCreateBot(command.CreateBotCommand) error   { return ni
 func (noopHandler) HandleStopBot(command.StopBotCommand) error       { return nil }
 func (noopHandler) HandleRestartBot(command.RestartBotCommand) error { return nil }
 
+type captureHandler struct {
+	create command.CreateBotCommand
+}
+
+func (h *captureHandler) HandleCreateBot(cmd command.CreateBotCommand) error {
+	h.create = cmd
+	return nil
+}
+
+func (h *captureHandler) HandleStopBot(command.StopBotCommand) error       { return nil }
+func (h *captureHandler) HandleRestartBot(command.RestartBotCommand) error { return nil }
+
 type testWriter struct {
 	t *testing.T
 }
@@ -199,6 +211,41 @@ func TestDispatchIgnoresUnknownType(t *testing.T) {
 
 	if err := manager.dispatch(payload, "unknown"); err != nil {
 		t.Fatalf("dispatch returned error: %v", err)
+	}
+}
+
+func TestDispatchCreateBotParsesPlaintextCredentials(t *testing.T) {
+	handler := &captureHandler{}
+	manager := NewManager("token", "secret", "ws://localhost:8080", handler, staticCounter(0), nil, nil)
+
+	payload := []byte(`{
+		"type":"create_bot",
+		"bot_id":"bot-plain",
+		"strategy_code":"print('ok')",
+		"params":{"fast_period":5},
+		"exchange":{
+			"type":"binance",
+			"api_key":"plain-api-key",
+			"secret":"plain-secret",
+			"trading_pair":"BTC_USDT",
+			"testnet":true
+		}
+	}`)
+
+	if err := manager.dispatch(payload, "create_bot"); err != nil {
+		t.Fatalf("dispatch returned error: %v", err)
+	}
+
+	if handler.create.BotID != "bot-plain" {
+		t.Fatalf("unexpected bot id: %q", handler.create.BotID)
+	}
+
+	if handler.create.Exchange.APIKey != "plain-api-key" || handler.create.Exchange.Secret != "plain-secret" {
+		t.Fatalf("unexpected plaintext exchange credentials: %+v", handler.create.Exchange)
+	}
+
+	if !handler.create.Exchange.Testnet {
+		t.Fatal("expected testnet=true")
 	}
 }
 

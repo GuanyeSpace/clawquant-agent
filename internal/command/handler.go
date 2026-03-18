@@ -16,9 +16,12 @@ type BotController interface {
 
 type ExchangeConfig struct {
 	Type            string `json:"type"`
+	APIKey          string `json:"api_key"`
+	Secret          string `json:"secret"`
 	EncryptedAPIKey string `json:"encrypted_api_key"`
 	EncryptedSecret string `json:"encrypted_secret"`
 	TradingPair     string `json:"trading_pair"`
+	Testnet         bool   `json:"testnet"`
 }
 
 type CreateBotCommand struct {

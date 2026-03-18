@@ -26,7 +26,6 @@ import (
 const (
 	stdoutScannerBufferSize = 1024 * 1024
 	stopTimeout             = 3 * time.Second
-	defaultTestnetFlag      = "1"
 )
 
 type Manager struct {
@@ -127,19 +126,9 @@ func (m *Manager) StartBot(cmd command.CreateBotCommand) (err error) {
 		}
 	}()
 
-	encryptionKey, err := resolveEncryptionKey(cmd.EncryptionKey)
+	apiKey, secret, err := resolveExchangeCredentials(cmd.Exchange, cmd.EncryptionKey)
 	if err != nil {
 		return err
-	}
-
-	apiKey, err := clawcrypto.Decrypt(cmd.Exchange.EncryptedAPIKey, encryptionKey)
-	if err != nil {
-		return fmt.Errorf("decrypt api key: %w", err)
-	}
-
-	secret, err := clawcrypto.Decrypt(cmd.Exchange.EncryptedSecret, encryptionKey)
-	if err != nil {
-		return fmt.Errorf("decrypt secret: %w", err)
 	}
 
 	botDir := filepath.Join(m.dataDir, "bots", cmd.BotID)
@@ -462,6 +451,38 @@ func resolveEncryptionKey(commandKey string) (string, error) {
 	return "", fmt.Errorf("encryption key is required")
 }
 
+func resolveExchangeCredentials(exchange command.ExchangeConfig, commandKey string) (string, string, error) {
+	apiKey := strings.TrimSpace(exchange.APIKey)
+	secret := strings.TrimSpace(exchange.Secret)
+	if apiKey != "" || secret != "" {
+		if apiKey == "" || secret == "" {
+			return "", "", fmt.Errorf("api key and secret must both be provided")
+		}
+		return apiKey, secret, nil
+	}
+
+	if strings.TrimSpace(exchange.EncryptedAPIKey) == "" || strings.TrimSpace(exchange.EncryptedSecret) == "" {
+		return "", "", fmt.Errorf("api key and secret are required")
+	}
+
+	encryptionKey, err := resolveEncryptionKey(commandKey)
+	if err != nil {
+		return "", "", err
+	}
+
+	apiKey, err = clawcrypto.Decrypt(exchange.EncryptedAPIKey, encryptionKey)
+	if err != nil {
+		return "", "", fmt.Errorf("decrypt api key: %w", err)
+	}
+
+	secret, err = clawcrypto.Decrypt(exchange.EncryptedSecret, encryptionKey)
+	if err != nil {
+		return "", "", fmt.Errorf("decrypt secret: %w", err)
+	}
+
+	return apiKey, secret, nil
+}
+
 func buildPythonEnv(baseEnv []string, sdkDir, botDir string, cmd command.CreateBotCommand, apiKey, secret string) []string {
 	env := make(map[string]string, len(baseEnv)+8)
 	for _, item := range baseEnv {
@@ -487,7 +508,7 @@ func buildPythonEnv(baseEnv []string, sdkDir, botDir string, cmd command.CreateB
 	env["CLAWQUANT_TRADING_PAIR"] = cmd.Exchange.TradingPair
 	env["CLAWQUANT_PARAMS"] = string(normalizeParams(cmd.Params))
 	env["CLAWQUANT_DATA_DIR"] = botDir
-	env["CLAWQUANT_TESTNET"] = resolveTestnetFlag()
+	env["CLAWQUANT_TESTNET"] = boolToFlag(cmd.Exchange.Testnet)
 
 	keys := make([]string, 0, len(env))
 	for key := range env {
@@ -510,12 +531,11 @@ func normalizeParams(params json.RawMessage) json.RawMessage {
 	return params
 }
 
-func resolveTestnetFlag() string {
-	value := strings.TrimSpace(os.Getenv("CLAWQUANT_TESTNET"))
-	if value == "" {
-		return defaultTestnetFlag
+func boolToFlag(value bool) string {
+	if value {
+		return "1"
 	}
-	return value
+	return "0"
 }
 
 func marshalDataString(data any) (string, error) {
