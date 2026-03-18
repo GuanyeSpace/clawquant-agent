@@ -68,6 +68,7 @@ type Manager struct {
 type authMessage struct {
 	Type      string `json:"type"`
 	Token     string `json:"token"`
+	Secret    string `json:"secret"`
 	Timestamp int64  `json:"timestamp"`
 	Signature string `json:"signature"`
 }
@@ -339,6 +340,7 @@ func (m *Manager) authenticate(conn *websocket.Conn) error {
 	auth := authMessage{
 		Type:      "auth",
 		Token:     m.token,
+		Secret:    m.secret,
 		Timestamp: timestamp,
 		Signature: clawcrypto.Sign(m.token, m.secret, timestamp),
 	}

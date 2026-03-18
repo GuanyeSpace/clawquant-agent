@@ -46,6 +46,11 @@ func TestManagerConnectDispatchesCommand(t *testing.T) {
 			return
 		}
 
+		if auth.Secret != "test-secret" {
+			t.Errorf("unexpected auth secret: %q", auth.Secret)
+			return
+		}
+
 		if !clawcrypto.Verify(auth.Token, "test-secret", auth.Signature, auth.Timestamp) {
 			t.Errorf("invalid auth signature")
 			return
@@ -123,6 +128,11 @@ func TestManagerConnectRejectsFailedAuth(t *testing.T) {
 		var auth authMessage
 		if err := conn.ReadJSON(&auth); err != nil {
 			t.Errorf("read auth failed: %v", err)
+			return
+		}
+
+		if auth.Secret != "test-secret" {
+			t.Errorf("unexpected auth secret: %q", auth.Secret)
 			return
 		}
 
@@ -207,6 +217,11 @@ func TestManagerSendLogPersistsAndSyncs(t *testing.T) {
 		var auth authMessage
 		if err := conn.ReadJSON(&auth); err != nil {
 			t.Errorf("read auth failed: %v", err)
+			return
+		}
+
+		if auth.Secret != "test-secret" {
+			t.Errorf("unexpected auth secret: %q", auth.Secret)
 			return
 		}
 
