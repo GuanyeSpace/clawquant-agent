@@ -1,0 +1,17 @@
+[Unit]
+Description=ClawQuant Agent
+After=network.target
+
+[Service]
+Type=simple
+User=clawquant
+Group=clawquant
+WorkingDirectory=/opt/clawquant-agent
+EnvironmentFile=-/etc/default/clawquant-agent
+Environment=CLAWQUANT_DATA_DIR=/opt/clawquant-agent/data
+ExecStart=/opt/clawquant-agent/clawquant-agent --token ${TOKEN} --secret ${SECRET} --server ${SERVER}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

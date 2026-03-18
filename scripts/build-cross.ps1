@@ -6,6 +6,7 @@ param(
     [string]$Version,
     [string]$Commit,
     [string]$BuildTime,
+    [string]$TargetsCsv,
     [string[]]$Targets = @(
         "windows/amd64",
         "windows/arm64",
@@ -18,6 +19,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not [string]::IsNullOrWhiteSpace($TargetsCsv)) {
+    $Targets = @(
+        $TargetsCsv.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
 
 function Resolve-GitValue {
     param(
