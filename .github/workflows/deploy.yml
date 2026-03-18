@@ -12,9 +12,9 @@ jobs:
       - name: Deploy to agent server
         uses: appleboy/ssh-action@v1
         with:
-          host: $ { secrets.DEPLOY_HOST } 
-          username: $ { secrets.DEPLOY_USER }
-          key: $ { secrets.DEPLOY_SSH_KEY }
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -e
             echo "=== Pulling latest code ==="
